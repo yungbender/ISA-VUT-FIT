@@ -1,15 +1,16 @@
+#pragma pack(push, 1)
 typedef struct dns_headers{
-    int id :16; // ID of question
-    int qr :1; // query(0) or response(1) bit 
-    int opcode :4; // type of querry (0, normal query)
-    int aa :1;
-    int tc :1;
-    int rd :1;
-    int ra :1;
-    int reserved :3;
-    int rcode :4;
-    int qdcount :16;
-    int ancount :16;
-    int nscount :16;
-    int arcount :16;
+    unsigned id :16; // ID of question
+    unsigned rd :1;
+    unsigned tc :1;
+    unsigned aa :1;
+    unsigned opcode :4; // type of querry (0, normal query)
+    unsigned qr :1; // query(0) or response(1) bit 
+    unsigned rcode :4;
+    unsigned reserved :3;
+    unsigned ra :1;
+    unsigned qdcount :16;
+    unsigned ancount :16;
+    unsigned nscount :16;
+    unsigned arcount :16;
 }dns_header;
