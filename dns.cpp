@@ -11,6 +11,7 @@
 #define A 1
 #define AAAA 28
 #define IN 1
+#define PTR 12
 
 #define BUFFER_SIZE 65527
 
@@ -179,7 +180,7 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
     dnsHeader->id = htons(1337);
     dnsHeader->rd = args->recursionDesired ? 1 : 0;
     dnsHeader->qdcount = htons(1);
-    dnsHeader->opcode = args->reverseQuery ? 1 : 0;
+    dnsHeader->opcode = 0;
 
     // Offset of dns question size in bytes
     int dnsQuestionOffset = sizeof(dns_header);
@@ -216,7 +217,11 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
     dnsPacket = (char *)dnsHeader;
 
     dns_question *dnsQuestion = (dns_question*)(dnsPacket + dnsQuestionOffset);
-    dnsQuestion->qtype = args->ipv6 ? htons(AAAA) : htons(A);
+    if(!args->reverseQuery)
+        dnsQuestion->qtype = args->ipv6 ? htons(AAAA) : htons(A);
+    else
+        dnsQuestion->qtype = htons(PTR);
+    
     dnsQuestion->qclass = htons(IN);
 
     dnsQuestionOffset += sizeof(dns_question);
@@ -265,6 +270,8 @@ class DnsParser
 {
     public:
         void parse_dns_response(char *dnsResponse, int *dnsResponseSize, int *dnsQuestionOffset);
+    private:
+        char* parse_answer(char *dnsAnswer, int answerCounts, char *dnsResponse);
 };
 
 char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
@@ -310,10 +317,6 @@ char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
         // If its not last label, print dot
         if(*labelStart != 0)
             std::cout << ".";
-        else
-        {
-            std::cout << ", ";
-        }
     }
     // If the pointer was backedup, need to return the backed up one
     if(wasBackedUp)
@@ -323,6 +326,86 @@ char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
         return labelStart + 1;
         
     
+}
+
+char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsResponse)
+{
+    dns_answer *dnsAnswerMiddle;
+    
+    for(int i = 0; i < answerCounts; i++)
+    {
+        dnsAnswer = parse_labels(dnsAnswer, true, dnsResponse);
+        std::cout << ", ";
+
+        dnsAnswerMiddle = (dns_answer *)dnsAnswer;
+
+        
+        dnsAnswerMiddle->type = ntohs(dnsAnswerMiddle->type);
+        dnsAnswerMiddle->class_ = ntohs(dnsAnswerMiddle->class_);
+        dnsAnswerMiddle->ttl = ntohl(dnsAnswerMiddle->ttl);
+        dnsAnswerMiddle->rdlength = ntohs(dnsAnswerMiddle->rdlength);
+
+        char *dnsRData = (char *)(dnsAnswerMiddle) + sizeof(dns_answer);
+
+        switch(dnsAnswerMiddle->type)
+        {
+            case 1:
+                std::cout << "A, ";
+                break;
+            case 2:
+                std::cout << "NS, ";
+                break;
+            case 5:
+                std::cout << "CNAME, ";
+                break;
+            case 6:
+                std::cout << "SOA, ";
+                break;
+            case 11:
+                std::cout << "WKS, ";
+                break;
+            case 12:
+                std::cout << "PTR, ";
+                break;
+            case 15:
+                std::cout << "MX, ";
+                break;
+            case 33:
+                std::cout << "SRV, ";
+                break;
+            case 28:
+                std::cout << "AAAA, ";
+                break;
+        }
+
+        if(dnsAnswerMiddle->class_ == 1)
+            std::cout << "IN, ";
+
+        std::cout << "TTL: " << dnsAnswerMiddle->ttl << ", ";
+
+        switch(dnsAnswerMiddle->type)
+        {
+            case 1:
+                char ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, dnsRData, ip, INET_ADDRSTRLEN);
+                std::cout << ip;
+                break;
+            case 28:
+                char ipv6[INET6_ADDRSTRLEN];
+                inet_ntop(AF_INET6, dnsRData, ipv6, INET6_ADDRSTRLEN);
+                std::cout << ipv6;
+                break;
+            case 5:
+                dnsRData = parse_labels(dnsRData, true, dnsResponse);
+                break;
+        }
+
+        // Get to the next answer, sizeof
+        dnsAnswer = dnsAnswer + sizeof(dns_answer) + dnsAnswerMiddle->rdlength;
+        std::cout << "\n";
+    }
+
+    return dnsAnswer;
 }
 
 void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int *dnsQuestionOffset)
@@ -383,6 +466,7 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int 
     {
         // Until there is not 0x00 in packet (that means end of domain name)
         dnsQuestionTail = (dns_question*)(parse_labels(dnsQuestion, false, dnsResponse));
+        std::cout << ", ";
 
         // Get the correct byte order
         dnsQuestionTail->qclass = ntohs(dnsQuestionTail->qclass);
@@ -432,79 +516,15 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int 
     }
 
     std::cout << "Answer section(" << dnsHeaderResponse->ancount << ") \n";
+
     char *dnsAnswer = dnsQuestion;
-    dns_answer *dnsAnswerMiddle;
-    
-    for(int i = 0; i < dnsHeaderResponse->ancount; i++)
-    {
-        dnsAnswer = parse_labels(dnsAnswer, true, dnsResponse);
+    dnsAnswer = this->parse_answer(dnsAnswer, dnsHeaderResponse->ancount, dnsResponse);
 
-        dnsAnswerMiddle = (dns_answer *)dnsAnswer;
+    std::cout << "Authority section(" << dnsHeaderResponse->nscount << ") \n";
+    dnsAnswer = this->parse_answer(dnsAnswer, dnsHeaderResponse->nscount, dnsResponse);
 
-        
-        dnsAnswerMiddle->type = ntohs(dnsAnswerMiddle->type);
-        dnsAnswerMiddle->class_ = ntohs(dnsAnswerMiddle->class_);
-        dnsAnswerMiddle->ttl = ntohl(dnsAnswerMiddle->ttl);
-        dnsAnswerMiddle->rdlength = ntohs(dnsAnswerMiddle->rdlength);
-
-        char *dnsRData = (char *)(dnsAnswerMiddle) + sizeof(dns_answer);
-
-        switch(dnsAnswerMiddle->type)
-        {
-            case 1:
-                std::cout << "A, ";
-                break;
-            case 2:
-                std::cout << "NS, ";
-                break;
-            case 5:
-                std::cout << "CNAME, ";
-                break;
-            case 6:
-                std::cout << "SOA, ";
-                break;
-            case 11:
-                std::cout << "WKS, ";
-                break;
-            case 12:
-                std::cout << "PTR, ";
-                break;
-            case 15:
-                std::cout << "MX, ";
-                break;
-            case 33:
-                std::cout << "SRV, ";
-                break;
-            case 28:
-                std::cout << "AAAA, ";
-                break;
-        }
-
-        if(dnsAnswerMiddle->class_ == 1)
-            std::cout << "IN, ";
-
-        switch(dnsAnswerMiddle->type)
-        {
-            case 1:
-                char ip[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, dnsRData, ip, INET_ADDRSTRLEN);
-                std::cout << ip;
-                break;
-            case 28:
-                char ipv6[INET6_ADDRSTRLEN];
-                inet_ntop(AF_INET6, dnsRData, ipv6, INET6_ADDRSTRLEN);
-                std::cout << ipv6;
-                break;
-            case 5:
-                dnsRData = parse_labels(dnsRData, true, dnsResponse);
-                break;
-        }
-
-        // Get to the next answer, sizeof
-        dnsAnswer = dnsAnswer + sizeof(dns_answer) + dnsAnswerMiddle->rdlength;
-
-        std::cout << "\n";
-    }
+    std::cout << "Additional section(" << dnsHeaderResponse->arcount << ") \n";
+    dnsAnswer = this->parse_answer(dnsAnswer, dnsHeaderResponse->arcount, dnsResponse);
 }
 
 int main(int argc, char *argv[])
