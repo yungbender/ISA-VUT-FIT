@@ -33,6 +33,7 @@ class Arguments
         std::string dnsServer;
         std::string port;
         std::string target;
+        int addressType;
         static Arguments* parse_arguments(int argc, char **argv);
 
     Arguments()
@@ -94,14 +95,14 @@ class DnsSender
         char* send_query(Arguments *args, int *dnsResponseSize, int *dnsQuestionOffset);
     
     private:
-        void set_dns_socket(std::string dnsServer, std::string port);
+        void set_dns_socket(std::string dnsServer, std::string port, Arguments *args);
         char* create_dns_packet(Arguments *args, int *dnsPacketSize);
-        std::vector<std::string> split_target(const char *target);
+        std::vector<std::string> split_target(std::string target, char delimeter);
         int dnsSocket;
     
 };
 
-void DnsSender::set_dns_socket(std::string dnsServer, std::string port)
+void DnsSender::set_dns_socket(std::string dnsServer, std::string port, Arguments *args)
 {
     struct addrinfo hints;
     struct addrinfo *result, *backup;
@@ -120,7 +121,7 @@ void DnsSender::set_dns_socket(std::string dnsServer, std::string port)
     while(result != NULL)
     {
         if(result->ai_family == AF_INET || result->ai_family == AF_INET6)
-        {            
+        {
             if((this->dnsSocket = socket(result->ai_family, SOCK_DGRAM, 0)) == -1)
             {
                 error("Cannot create socket!\n");
@@ -146,27 +147,77 @@ void DnsSender::set_dns_socket(std::string dnsServer, std::string port)
 
 }
 
-std::vector<std::string> DnsSender::split_target(const char *target)
+std::vector<std::string> DnsSender::split_target(std::string target, char delimeter)
 {
-    char *copy = (char *)malloc(strlen(target));
-    memcpy(copy, target, strlen(target));
+    std::replace(target.begin(), target.end(), '.', ' ');
 
+    std::stringstream stringStream(target);
     std::vector<std::string> tokens;
-    
-    char *token = strtok(copy, ".");
-    while(token != NULL)
-    {
-        tokens.push_back(std::string(token));
-        token = strtok(NULL, ".");
-    }
-
-    free(copy);
+    std::string backup;
+    while(stringStream >> backup)
+        tokens.push_back(backup);
     return tokens;
 }
 
 char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
 {
-    std::vector<std::string> tokens = this->split_target(args->target.c_str());
+    std::vector<std::string> tokens;
+    // If its reversequery revert the IP address and add in addr arpa address
+    if(args->reverseQuery)
+    {
+        // If it is ipv4 split by dot
+        if(!args->ipv6)
+        {
+            tokens = this->split_target(args->target, '.');
+            std::vector<std::string> tokensReverse;
+            for(int i = (tokens.size() - 1); i >= 0; i--)
+            {
+                tokensReverse.push_back(tokens[i]);
+            }
+
+            tokensReverse.push_back("in-addr");
+            tokensReverse.push_back("arpa");
+
+            tokens = tokensReverse;
+        }
+        else
+        {
+            std::stringstream stream;
+            char ipv6[16];
+            memset(&ipv6, 0, 16);
+
+            inet_pton(AF_INET6, args->target.c_str(), &ipv6);
+
+            std::vector<std::string> hexTokens;
+            for(int i = 0; i < 16; i++)
+            {
+                char token[8];
+                printf("%02x", ipv6[i]);
+                sprintf(token, "%02x", ipv6[i]);
+
+            }
+
+
+            for(auto iter = hexTokens.rbegin(); iter != hexTokens.rend(); ++iter)
+            {
+                for(unsigned index = 0; index < (*iter).size(); index++)
+                {
+                    tokens.push_back(&(*iter)[index]);
+                }
+            }
+            
+        }
+        
+    }
+    else
+    {
+        // Split the target by dots
+        tokens = this->split_target(args->target, '.');
+    }
+    
+
+    for(long unsigned i = 0; i < tokens.size(); i++)
+        std::cout << tokens[i] << "\n";
 
     // Allocate first part of dns packet, dns header
     dns_header *dnsHeader = (dns_header *)malloc(sizeof(dns_header));
@@ -232,7 +283,7 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
 
 char* DnsSender::send_query(Arguments *args, int *dnsResponseSize, int *dnsQuestionOffset)
 {
-    this->set_dns_socket(args->dnsServer, args->port);
+    this->set_dns_socket(args->dnsServer, args->port, args);
 
     int dnsPacketSize = 0;
     char *dnsPacket = this->create_dns_packet(args, &dnsPacketSize);
@@ -396,6 +447,9 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
                 std::cout << ipv6;
                 break;
             case 5:
+                dnsRData = parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case PTR:
                 dnsRData = parse_labels(dnsRData, true, dnsResponse);
                 break;
         }
