@@ -1,19 +1,25 @@
-// Project for subject Computer Communications and Networks
-// TCP/UDP port scanner
-// Author: Tomáš Sasák
+// Project for subject Network Applications and Network Administration
+// DNS Resolver
+// Author: Tomáš Sasák, xsasak01@stud.fit.vutbr.cz
 // BUT FIT 2019
 
-#include "dns.hpp"
+#include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <algorithm>
+#include <iomanip>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netdb.h>
+
 #include "dns_header.hpp"
 #include "dns_question.hpp"
 #include "dns_answer.hpp"
-
-#define A 1
-#define AAAA 28
-#define IN 1
-#define PTR 12
-
-#define BUFFER_SIZE 65527
+#include "record_types.hpp"
 
 void error(std::string error)
 {
@@ -21,31 +27,50 @@ void error(std::string error)
     exit(1);
 }
 
+///////////////////////////////////////////////
+
 /**
  * Class representing command line arguments.
  */
 class Arguments
 {
     public:
+        // Flag if recursion was requested by user
         bool recursionDesired;
+        // Flag if user wants to use reverse query
         bool reverseQuery;
+        // Flag if user wants AAAA record (ipv6)
         bool ipv6;
+        // String of user dns server argument
         std::string dnsServer;
+        // Port where to send the dns request
         std::string port;
+        // Target for host translation
         std::string target;
-        int addressType;
+        /**
+         * Function parses arguments from command line and saves the into the instance of this class.
+         * 
+         * @param argc Number of arguments
+         * @param argv Pointer to the array of arguments
+         * @return Function returns initialized instance of Arguments
+         */
         static Arguments* parse_arguments(int argc, char **argv);
 
+    /**
+     * Arguments constructor
+     */
     Arguments()
     {
+        // Initial settings
         this->recursionDesired = false;
         this->reverseQuery = false;
         this->ipv6 = false;
         this->dnsServer = "";
-        this->port = "53";
+        this->port = "53"; // Default DNS port
         this->target = "";
     }
 };
+
 
 Arguments* Arguments::parse_arguments(int argc, char **argv)
 {
@@ -76,10 +101,12 @@ Arguments* Arguments::parse_arguments(int argc, char **argv)
         }
     }
 
+    // Check for additional arguments
     if ((optind + 1) != argc)
     {
         error("Error, unusual parameters given!\n");
     }
+    // Check if server is missing
     else if (!wasServer)
     {
         error("Missing -s argument!\n");
@@ -89,29 +116,66 @@ Arguments* Arguments::parse_arguments(int argc, char **argv)
     return arguments;
 }
 
+///////////////////////////////////////////////
+
+/**
+ * Class sends dns packet and recieves answer.
+ */
 class DnsSender
 {
     public:
-        char* send_query(Arguments *args, int *dnsResponseSize, int *dnsQuestionOffset);
+        /**
+         * Method sends DNS packet (question) to the given server using socket,
+         * and returns pointer to the recieved DNS packet (answer).
+         * 
+         * @param args Pointer to the object of class Arguments which has user arguments
+         * @param dnsResponseSize Pointer containing how big is the DNS answer packet
+         */
+        char* send_query(Arguments *args, int *dnsResponseSize);
     
     private:
+        /**
+         * Method fetches the given DNS server and sets up the socket based by
+         * the options given from getaddrinfo(). Socket handle is in variable dnsSocket.
+         * 
+         * @param dnsServer DNS server given from user, where program will ask
+         * @param port Port number where to ask
+         * @param args Arguments given by user
+         * 
+         */
         void set_dns_socket(std::string dnsServer, std::string port, Arguments *args);
+        /**
+         * Method creates DNS packet (query) which contains question and settings
+         * for dns server. Function returns the size of the packet in pointer variable
+         * dnsPacketSize.
+         * 
+         * @param args User arguments
+         * @param dnsPacketSize Size of the packet
+         */
         char* create_dns_packet(Arguments *args, int *dnsPacketSize);
+        /**
+         * Method splits the target string by delimeter into vector.
+         * (explode in php)
+         * @param target String which needs to be splitted
+         * @param delimeter Delimeter by which the split will be
+         * 
+         * @return Method returns vector of splitted strings
+         */
         std::vector<std::string> split_target(std::string target, char delimeter);
+        // Socket handle
         int dnsSocket;
-    
 };
 
 void DnsSender::set_dns_socket(std::string dnsServer, std::string port, Arguments *args)
 {
     struct addrinfo hints;
     struct addrinfo *result, *backup;
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
-    int retval;
 
-    if((retval = getaddrinfo(dnsServer.c_str(), port.c_str(), &hints, &result)) != 0)
+    if((getaddrinfo(dnsServer.c_str(), port.c_str(), &hints, &result)) != 0)
     {
         error("Cannot fetch given dns server!\n");
     }
@@ -126,11 +190,11 @@ void DnsSender::set_dns_socket(std::string dnsServer, std::string port, Argument
             {
                 error("Cannot create socket!\n");
             }
-            if((retval = connect(this->dnsSocket, result->ai_addr, result->ai_addrlen)) == -1)
+            if((connect(this->dnsSocket, result->ai_addr, result->ai_addrlen)) == -1)
             {
-                error(strerror(errno));
                 error("Cannot connect to the dns server!\n");
             }
+
             break;
         }
         result = result->ai_next;
@@ -141,15 +205,12 @@ void DnsSender::set_dns_socket(std::string dnsServer, std::string port, Argument
         error("Cannot fetch given dns server!\n");
     }
 
-    std::cout << "DNS server is allright!\n";
-
     freeaddrinfo(backup);
-
 }
 
 std::vector<std::string> DnsSender::split_target(std::string target, char delimeter)
 {
-    std::replace(target.begin(), target.end(), '.', ' ');
+    std::replace(target.begin(), target.end(), delimeter, ' ');
 
     std::stringstream stringStream(target);
     std::vector<std::string> tokens;
@@ -162,10 +223,19 @@ std::vector<std::string> DnsSender::split_target(std::string target, char delime
 char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
 {
     std::vector<std::string> tokens;
-    // If its reversequery revert the IP address and add in addr arpa address
+    // If its reversequery revert the IP address 
     if(args->reverseQuery)
     {
-        // If it is ipv4 split by dot
+        char buffer[16];
+        // Check if the given address is ipv4 or ipv6
+        if(inet_pton(AF_INET, args->target.c_str(), &buffer))
+            args->ipv6 = false;
+        else if(inet_pton(AF_INET6, args->target.c_str(), &buffer))
+            args->ipv6 = true;
+        else 
+            error("Invalid IP address given!\n");
+        
+        // If it is ipv4 split by dot and add in-addr arpa for reverse search
         if(!args->ipv6)
         {
             tokens = this->split_target(args->target, '.');
@@ -180,6 +250,9 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
 
             tokens = tokensReverse;
         }
+        // If it is ipv6, transfer the address into binary representation
+        // and save each byte as HEX value to parse the address without
+        // loosing nerves and life, also add ip6 arpa 
         else
         {
             char ipv6[16];
@@ -206,46 +279,40 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
     }
     else
     {
-        // Split the target by dots
+        // It is domain, split the target by dots
         tokens = this->split_target(args->target, '.');
     }
     
-
-    for(long unsigned i = 0; i < tokens.size(); i++)
-        std::cout << tokens[i] << "\n";
-
     // Allocate first part of dns packet, dns header
     dns_header *dnsHeader = (dns_header *)malloc(sizeof(dns_header));
 
     // Make a startup backup of this packet
     char *dnsPacket = (char *)dnsHeader;
-
-
     memset(dnsHeader, 0, sizeof(dns_header));
-    dnsHeader->opcode = 0;
-    dnsHeader->id = htons(1337);
-    dnsHeader->rd = args->recursionDesired ? 1 : 0;
-    dnsHeader->qdcount = htons(1);
-    dnsHeader->opcode = 0;
+
+    dnsHeader->opcode = 0; // 0 (query)
+    dnsHeader->id = htons(1337); // Random ID
+    dnsHeader->rd = args->recursionDesired ? 1 : 0; // Recursion desirec
+    dnsHeader->qdcount = htons(1); // Number of question, always one question
 
     // Offset of dns question size in bytes
     int dnsQuestionOffset = sizeof(dns_header);
 
-    // For every part of target query, allocate new place and insert it in dns question
+    // For every part(label) of requested domain/IP create the labels in the Question section
     for(std::size_t index = 0; index < tokens.size(); index++)
     {
+        // Number of labels
         int length = tokens[index].length();
 
-        // Create new space in dns packet for the length of token and actual token
+        // Create new space in DNS packet for the single label + byte which signifies length of label in bytes 
         dnsHeader = (dns_header *)realloc(dnsHeader, (dnsQuestionOffset + tokens[index].length() + sizeof(char)));
         dnsPacket = (char *)dnsHeader;
 
-
-        // Copy length of token in packet
+        // Copy length of label in packet
         memcpy((dnsPacket + dnsQuestionOffset), &length, sizeof(char));
         dnsQuestionOffset += sizeof(char);
 
-        // Copy token in packet
+        // Copy label in packet
         memcpy((dnsPacket + dnsQuestionOffset), tokens[index].c_str(), length);
         dnsQuestionOffset += length;
     }
@@ -255,7 +322,7 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
     dnsPacket = (char *)dnsHeader;
 
     int zero = 0;
-    memcpy((dnsPacket+dnsQuestionOffset), &zero, sizeof(char));
+    memcpy((dnsPacket + dnsQuestionOffset), &zero, sizeof(char));
     dnsQuestionOffset += sizeof(char);
 
     // Allocate new place for the rest of dns question
@@ -276,13 +343,16 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
     return dnsPacket;
 }
 
-char* DnsSender::send_query(Arguments *args, int *dnsResponseSize, int *dnsQuestionOffset)
+char* DnsSender::send_query(Arguments *args, int *dnsResponseSize)
 {
+    // Setup the socket for sending
     this->set_dns_socket(args->dnsServer, args->port, args);
 
+    // Create DNS query packet
     int dnsPacketSize = 0;
     char *dnsPacket = this->create_dns_packet(args, &dnsPacketSize);
 
+    // Send the packet
     send(this->dnsSocket, dnsPacket, dnsPacketSize, 0);
 
     free(dnsPacket);
@@ -293,36 +363,64 @@ char* DnsSender::send_query(Arguments *args, int *dnsResponseSize, int *dnsQuest
     tv.tv_usec = 0;
     setsockopt(this->dnsSocket, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(tv));
     
-    char *buffer = (char *)malloc(BUFFER_SIZE);
+    char *buffer = (char *)malloc(MAX_DNS_SIZE);
     int recieved = 0;
 
-    if((recieved = recv(this->dnsSocket, buffer, BUFFER_SIZE, 0)) < 0)
+    if((recieved = recv(this->dnsSocket, buffer, MAX_DNS_SIZE, 0)) < 0)
     {
         if(errno != EINTR)
             error(strerror(errno));
     }
 
-    std::cout << "dns packet size recieved:" << recieved << "\n";
-    std::cout << "\n";
-
     close(this->dnsSocket);
     *dnsResponseSize = recieved;
-    *dnsQuestionOffset = dnsPacketSize;
     // Return the useless bites
     return (char *)realloc(buffer, recieved + 1);
 }
 
+///////////////////////////////////////////////
+
+/**
+ * Class parses the DNS answer packet and prints output.
+ */
 class DnsParser
 {
     public:
-        void parse_dns_response(char *dnsResponse, int *dnsResponseSize, int *dnsQuestionOffset);
+        /**
+         * Method parses the DNS response packet and prints out the results.
+         * 
+         * @param dnsResponse Pointer to the DNS response packet
+         * @param dnsResponseSize Size of the packet
+         */
+        void parse_dns_response(char *dnsResponse, int *dnsResponseSize);
+        /**
+         * Method parses the label part in the DNS section.
+         * 
+         * @param labelStart Pointer to the start of the labels
+         * @param allowPointer Bool which signifies, if the pointer is allowed
+         * (pointer is used in the DNS answers, to compress the size of the DNS
+         * packet by including pointer for repeating label, to not repeat it again)
+         * @param dnsStart Pointer to the beginning of the DNS answer packet.
+         * 
+         * @return Method returns pointer to the DNS answer packet where the labels stopped.
+         */
+        char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart);
     private:
+        /**
+         * Method parses the ANSWER/AUTHORITY/ADDITIONAL section of DNS packet
+         * answer.
+         * 
+         * @param dnsAnswer Pointer to the ANSWER/AUTHORITY/ADDITIONAL section of dns packet
+         * @param answerCounts Number of items in the section
+         * @param dnsResponse Pointer to the beginning of the DNS answer packet
+         * 
+         * @return Method returns pointer to the DNS answer packet after the end of section.
+         */
         char* parse_answer(char *dnsAnswer, int answerCounts, char *dnsResponse);
 };
 
-char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
+char* DnsParser::parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
 {
-    int pointer = 0;
     char *backup;
     backup = labelStart;
     bool wasBackedUp = false;
@@ -333,11 +431,14 @@ char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
         memcpy(&pointerCheck, labelStart, sizeof(pointerCheck));
         pointerCheck = ntohs(pointerCheck);
         // Check if its pointer to name or name with labels
+        // If the DNS label is compressed, the first two BITS will be 11
+        // 1100 0000 == 0xC000
         if((pointerCheck >= (uint16_t)(0xC000)) && allowPointer)
         {
-            // Get the pointer (offset) value by substracting the 11XX XXXX
+            // Get the pointer (offset) value by substracting the 1100 0000
+            // Because the first 2 bits are taken by pointer definition 
             pointerCheck -= (uint16_t)(0xC000);
-            // Skip the 2 octets of pointer and offest
+            // Skip the 2 octets of pointer and offset 
             labelStart = labelStart + sizeof(pointerCheck);
             // backup the original pointer to return it back correctly
             if(wasBackedUp == false)
@@ -345,20 +446,20 @@ char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
                 backup = labelStart;
                 wasBackedUp = true;
             }
-            // Now get to the offset of dns packet and also b
+            // Now get to the label given by pointer offset
             labelStart = dnsStart + (pointerCheck);
 
             // Continue parsing the pointer
-            pointer++;
             continue;
         }
+        // It is not pointer, it is normal labeling
         // For the number in the first octet of label print the next characters from label
         int8_t labelValue = *((int8_t *)(labelStart));
         for(int8_t index = 0; index < labelValue; index++)
         {
             std::cout << labelStart[1 + index];
         }
-        // get to the next token = Pointer to the token label + 1 byte (label number) + label chars itself
+        // get to the next label = Pointer to the token label + 1 byte (label number) + label chars itself
         labelStart = labelValue + labelStart + 1;
         // If its not last label, print dot
         if(*labelStart != 0)
@@ -370,8 +471,6 @@ char* parse_labels(char *labelStart, bool allowPointer, char *dnsStart)
     // If the pointer was not backed up, return the the label + skip the 0x00
     else
         return labelStart + 1;
-        
-    
 }
 
 char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsResponse)
@@ -380,76 +479,81 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
     
     for(int i = 0; i < answerCounts; i++)
     {
-        dnsAnswer = parse_labels(dnsAnswer, true, dnsResponse);
+        // Labels are always at the start, parse them
+        dnsAnswer = this->parse_labels(dnsAnswer, true, dnsResponse);
         std::cout << ", ";
 
+        // Now parse the static part of Answer section
         dnsAnswerMiddle = (dns_answer *)dnsAnswer;
 
-        
         dnsAnswerMiddle->type = ntohs(dnsAnswerMiddle->type);
         dnsAnswerMiddle->class_ = ntohs(dnsAnswerMiddle->class_);
         dnsAnswerMiddle->ttl = ntohl(dnsAnswerMiddle->ttl);
         dnsAnswerMiddle->rdlength = ntohs(dnsAnswerMiddle->rdlength);
 
+        // Get pointer to the Record of the answer
         char *dnsRData = (char *)(dnsAnswerMiddle) + sizeof(dns_answer);
 
         switch(dnsAnswerMiddle->type)
         {
-            case 1:
+            case A:
                 std::cout << "A, ";
                 break;
-            case 2:
+            case NS:
                 std::cout << "NS, ";
                 break;
-            case 5:
+            case CNAME:
                 std::cout << "CNAME, ";
                 break;
-            case 6:
+            case SOA:
                 std::cout << "SOA, ";
                 break;
-            case 11:
+            case WKS:
                 std::cout << "WKS, ";
                 break;
-            case 12:
+            case PTR:
                 std::cout << "PTR, ";
                 break;
-            case 15:
+            case MX:
                 std::cout << "MX, ";
                 break;
-            case 33:
+            case SRV:
                 std::cout << "SRV, ";
                 break;
-            case 28:
+            case AAAA:
                 std::cout << "AAAA, ";
                 break;
         }
 
-        if(dnsAnswerMiddle->class_ == 1)
+        if(dnsAnswerMiddle->class_ == IN)
             std::cout << "IN, ";
 
         std::cout << "TTL: " << dnsAnswerMiddle->ttl << ", ";
 
+        // Parse the record
         switch(dnsAnswerMiddle->type)
         {
-            case 1:
+            case A:
                 char ip[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, dnsRData, ip, INET_ADDRSTRLEN);
                 std::cout << ip;
                 break;
-            case 28:
+            case AAAA:
                 char ipv6[INET6_ADDRSTRLEN];
                 inet_ntop(AF_INET6, dnsRData, ipv6, INET6_ADDRSTRLEN);
                 std::cout << ipv6;
                 break;
-            case 5:
-                dnsRData = parse_labels(dnsRData, true, dnsResponse);
+            case CNAME:
+                // CNAME has labels, parse them
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
                 break;
             case PTR:
-                dnsRData = parse_labels(dnsRData, true, dnsResponse);
+                // PTR has labels, parse them
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
                 break;
         }
 
-        // Get to the next answer, sizeof
+        // Get to the next answer OR end of the section
         dnsAnswer = dnsAnswer + sizeof(dns_answer) + dnsAnswerMiddle->rdlength;
         std::cout << "\n";
     }
@@ -457,7 +561,7 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
     return dnsAnswer;
 }
 
-void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int *dnsQuestionOffset)
+void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize)
 {
     // Preparse dns header from response
     dns_header *dnsHeaderResponse = (dns_header *)dnsResponse;
@@ -513,8 +617,8 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int 
     // Print the domain name in question
     for(int i = 0; i < dnsHeaderResponse->qdcount; i++)
     {
-        // Until there is not 0x00 in packet (that means end of domain name)
-        dnsQuestionTail = (dns_question*)(parse_labels(dnsQuestion, false, dnsResponse));
+        // Print the domain name in the question, in question there are no pointers
+        dnsQuestionTail = (dns_question*)(this->parse_labels(dnsQuestion, false, dnsResponse));
         std::cout << ", ";
 
         // Get the correct byte order
@@ -523,31 +627,31 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int 
 
         switch(dnsQuestionTail->qtype)
         {
-            case 1:
+            case A:
                 std::cout << "A, ";
                 break;
-            case 2:
+            case NS:
                 std::cout << "NS, ";
                 break;
-            case 5:
+            case CNAME:
                 std::cout << "CNAME, ";
                 break;
-            case 6:
+            case SOA:
                 std::cout << "SOA, ";
                 break;
-            case 11:
+            case WKS:
                 std::cout << "WKS, ";
                 break;
-            case 12:
+            case PTR:
                 std::cout << "PTR, ";
                 break;
-            case 15:
+            case MX:
                 std::cout << "MX, ";
                 break;
-            case 33:
+            case SRV:
                 std::cout << "SRV, ";
                 break;
-            case 28:
+            case AAAA:
                 std::cout << "AAAA, ";
                 break;
             case 255:
@@ -555,7 +659,7 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int 
                 break;
         }
 
-        if(dnsQuestionTail->qclass == 1)
+        if(dnsQuestionTail->qclass == IN)
         {
             std::cout << "IN \n";
         }
@@ -565,6 +669,8 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int 
     }
 
     std::cout << "Answer section(" << dnsHeaderResponse->ancount << ") \n";
+
+    // Parsing of ANSWER, AUTHORITY, ADDITIONAL section is the same
 
     char *dnsAnswer = dnsQuestion;
     dnsAnswer = this->parse_answer(dnsAnswer, dnsHeaderResponse->ancount, dnsResponse);
@@ -576,16 +682,18 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize, int 
     dnsAnswer = this->parse_answer(dnsAnswer, dnsHeaderResponse->arcount, dnsResponse);
 }
 
+///////////////////////////////////////////////
+
 int main(int argc, char *argv[])
 {
     Arguments *arguments = Arguments::parse_arguments(argc, argv);
 
     DnsSender *dnsSender = new DnsSender;
-    int dnsResponseSize, dnsQuestionOffset;
-    char *dnsResponse = dnsSender->send_query(arguments, &dnsResponseSize, &dnsQuestionOffset);
+    int dnsResponseSize;
+    char *dnsResponse = dnsSender->send_query(arguments, &dnsResponseSize);
 
     DnsParser *dnsParser = new DnsParser;
-    dnsParser->parse_dns_response(dnsResponse, &dnsResponseSize, &dnsQuestionOffset);
+    dnsParser->parse_dns_response(dnsResponse, &dnsResponseSize);
 
     free(dnsResponse);
     delete arguments;

@@ -1,3 +1,6 @@
+#ifndef DNSH_H
+#define DNSH_H
+
 #pragma pack(push, 1)
 typedef struct dns_headers{
     unsigned id :16; // ID of question
@@ -14,3 +17,5 @@ typedef struct dns_headers{
     unsigned nscount :16;
     unsigned arcount :16;
 }dns_header;
+
+#endif
