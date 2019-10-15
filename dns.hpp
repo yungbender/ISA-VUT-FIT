@@ -7,6 +7,7 @@
 #include <string> // string
 #include <sstream>
 #include <algorithm>
+#include <iomanip>
 #include <vector> // vectors
 #include <cstdlib> // stof, stoi
 #include <unistd.h> // getopt

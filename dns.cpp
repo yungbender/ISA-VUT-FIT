@@ -182,30 +182,25 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
         }
         else
         {
-            std::stringstream stream;
             char ipv6[16];
             memset(&ipv6, 0, 16);
 
             inet_pton(AF_INET6, args->target.c_str(), &ipv6);
 
-            std::vector<std::string> hexTokens;
-            for(int i = 0; i < 16; i++)
+            std::ostringstream stream;
+            stream << std::hex << std::setfill('0');
+            for(int index : ipv6)
             {
-                char token[8];
-                printf("%02x", ipv6[i]);
-                sprintf(token, "%02x", ipv6[i]);
-
+                stream << std::setw(2) << index;
             }
 
-
-            for(auto iter = hexTokens.rbegin(); iter != hexTokens.rend(); ++iter)
+            std::string result = stream.str();
+            for(unsigned index = result.size() - 1; index < result.size(); index--)
             {
-                for(unsigned index = 0; index < (*iter).size(); index++)
-                {
-                    tokens.push_back(&(*iter)[index]);
-                }
+                tokens.push_back(std::string(1, result[index]));
             }
-            
+            tokens.push_back("ip6");
+            tokens.push_back("arpa");
         }
         
     }
