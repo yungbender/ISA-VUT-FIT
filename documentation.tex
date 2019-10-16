@@ -1,0 +1,321 @@
+\documentclass[titlepage]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{url}
+
+
+\begin{document}
+
+\title{DNS Resolver}
+\author{Tomáš Sasák}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Úvod do problematiky}
+Zadanie je nasledujúce, implementujte program DNS, ktorý bude zasielať
+dotazy na DNS servery a včitatelnej podobe vypisovať prijaté odpovede
+od daného DNS servera na štandartný výstup. Zostavenie a analýza DNS paketov
+musí byť implementovaná priamo v programe. Stačí považovať iba UDP komunikáciu.
+
+\subsection{DNS}
+Domain name systém (DNS), je systém, ktorý ukladá prístup k informácií o názve
+stroja a názve domény v istej databáze. Najdôležitejšie je, že poskytuje mechanizmus
+získania IP adresy pre každé meno stroja a naopak. DNS poskytuje dôležitú službu, pretože
+kým počítače a sieťový hardware pracujú s IP adresami, ľudia si lahšie pamatajú mená
+strojov a domém pri ich používaní. DNS tvojrí prostredníka medzi človekom a strojom.
+
+\subsection{DNS packet}
+DNS packet sa skladá z nasledujúcich častí
+\begin{itemize}
+    \item Header (hlavička)
+    \item Question (otázka)
+    \item Answer (odpoveď)
+    \item Authority (autorizovaná odpoveď)
+    \item Additional (naviac odpovede)
+\end{itemize}
+
+\subsubsection{Header (hlavička)}
+Táto časť má velkosť 12B a skladá sa z nasledujúcich častí
+\begin{itemize}
+    \item \verb|ID| - identifikačné číslo packetu (2B)
+    \item \verb|QR| - flag identifikujúci či sa jedná o otázku alebo odpoveď (1b)
+    \item \verb|OPCODE| - označuje variantu balíku (4b)
+    \item \verb|TC| - flag identifikujúci poškodený balík (1b)
+    \item \verb|RD| - flag identifikujúci či je vyžiadaná rekurzia (1b)
+    \item \verb|Z| - rezerované miesto (1b)
+    \item \verb|RA| - flag identifikujúci či je server dokáže vykonať rekurziu (1b)
+    \item \verb|QDCOUNT| - číslo identifikujúce počet otázok (2B)
+    \item \verb|ANCOUNT| - číslo identifikujúce počet odpovedí (2B)
+    \item \verb|NSCOUNT| - číslo identifikujúce počet autorizovaných odpovedí (2B)
+    \item \verb|ARCOUNT| - číslo identifikujúce počet naviac odpovedí (2B)
+\end{itemize}
+Hlavička ma vždy pevnú veľkosť a je súčasťou každého DNS packetu.
+
+\subsubsection{Question (otázka)}
+Táto časť ma premennú velkosť a je súčasťou každého DNS packetu.
+Skladá sa z následovných časťí
+\begin{itemize}
+    \item \verb|NAME| - meno domény, ktorá má byť preložená
+    \item \verb|TYPE| - typ záznamu
+    \item \verb|CLASS| - trieda komunikácie
+\end{itemize}
+
+\paragraph{NAME}
+Meno domény alebo IP adresa (pri reverznom DNS vyhľadávaní), ktorá musí byť podla
+normy rozdelená podla znaku "." (bodka), na dané štítky (labels). V časti otázka (question),
+sa ešte musí pridať pred každý štítok (label) pridať číslo, ktoré označuje kolko znakov
+obsahuje daný štítok.
+
+\paragraph{TYPE}
+Typ záznamu, ktorých je mnoho. V tomto projekte sú najviac používané
+\begin{itemize}
+    \item \verb|A| - záznam obsahujúci IPv4 adresu
+    \item \verb|AAAA| - záznam obsahujúci IPv6 adresu
+    \item \verb|CNAME| - záznam obsahujúci alias danej domény za inú 
+    \item \verb|PTR| - ukazateľ (pointer) na alias
+    \item \verb|NS| - autorizovaný záznam
+\end{itemize}
+
+\paragraph{CLASS}
+Trieda komunikácie. v tomto projekte iba
+\begin{itemize}
+   \item \verb|IN| - komunikácia Internet
+\end{itemize}
+Tieto časti tvoria jednu DNS otázku (question), samozrejme otázok môže byť viac
+a takto by sa časti opakovali.
+Poznamenať treba, že ak sa jedná o reverznú otázku, v časti \verb|NAME| je potrené
+danú adresu rozdeliť na štítky (labels) a pridať nové štítky ktoré značia že ide o reverznú
+otázku. Pri adresách IPv4, je adresa rozdelená podobne ako doména (čiže podla znaku ".") a štítky 
+(labels) sú uložené pospiatočky, nakoniec su pridané 2 štítky, \verb|in-addr| a \verb|arpa|, vďaka ktorým,
+sa doména reverzne jednoduchšie vyhľadáva. Pri adresách typu IPv6, je adresa prevedená do dlhej podoby a
+každý hexadecimálny člen značí 1 štítok (label), nakoniec sú pridané 2 štítky (labels) \verb|ip6| a \verb|arpa|.
+
+\subsubsection{Answer (odpoved)}
+Reprezentuje odpoveď DNS serveru.
+Táto časť ma premennú velkosť. Je podobná otázke (question).
+Skladá sa z následujúcich častí.
+
+\begin{itemize}
+    \item \verb|NAME| - identické ako pri otázke (question)
+    \item \verb|TYPE| - identické ako pri otázke (question)
+    \item \verb|CLASS| - identické ako pri otázke (question)
+    \item \verb|TTL| - time-to-live, dĺžka platnosti odpovede (používané pre caching)
+    \item \verb|DL| - dĺžka následujúceho záznamu, ktorý následuje (záznamy rovnaké ako pri question)
+    \item \verb|dáta| - dáta záznamu
+\end{itemize}
+Ako v predchádzajúcej časti, tak aj odpovedí (answer) môže byť viac ako 1. 
+\paragraph{NAME}
+Je dôležité poznamenať, že odpovede od DNS serveru, môžu byť komprimované,
+to znamená že namiesto značiek (labels), ktoré sa opakujú, je číselne daný offset
+od začiatku paketu kde sa daná značka nachádza po prvý krát. Tento príznak je naznačený tak,
+že na mieste prvých dvoch bitov bytu, ktorý označuje dĺžku labelu, sa nachádzajú bity 11.
+
+\subsubsection{Authoritative Answer (autorizovaná odpoveď)}
+Reprezentuje odpoveď DNS serveru, ktorý je autorizovaný. Takýto DNS server
+obsahuje skutočné záznamy domén a IP adries, z ktorých je odpoveď vytvorená.
+Jej časti sú identické ako pri odpovedi (answer). Má premennú velkosť. 
+
+\subsubsection{Additional (naviac odpovede)}
+Táto sekcia reprezentuje záznamy, ktoré priamo nemusia byť odpoveďou na otázku (question),
+ale môžu mať s odpoveďou niečo spoločné. Formát je rovnaký ako pri odpovedi (answer).
+
+\newpage
+\section{Implementácia}
+Všetká komunikácia prebieha pomocou protokolu UDP.
+Implementácia DNS resolveru sa skladá z nasledujúcich tried
+\begin{itemize}
+    \item \verb|Arguments|
+    \item \verb|DnsSender|
+    \item \verb|DnsParser|
+\end{itemize}
+
+\subsection{Trieda Arguments}
+Trieda obsahuje metódu pre spracovanie vstupných argumentov, a obsahuje premenné
+ktoré vlastnia hodnotu argumentu.
+
+Obsahuje následujúce metódy
+\begin{itemize}
+    \item \verb|parse_arguments| - metóda spracuje argumenty a inicializuje inštanciu triedy
+\end{itemize}
+
+A nasledujúce premenné
+\begin{itemize}
+    \item \verb|recursionDesired| - bool značiaci vyžiadanú rekurziu (parameter -r)
+    \item \verb|reverseQuery| - bool značiaci vyžiadanú reverznú otázku
+    \item \verb|ipv6| - bool značiaci či je požadovaný záznam AAAA (IPv6 adresa)
+    \item \verb|dnsServer| - reťazec, obsahujúci adresu/doménu DNS serveru
+    \item \verb|port| - číslo, obsahujúce port na ktorý je DNS paket odoslaný (štandartne 53)
+    \item \verb|target| - reťazec, obsahujúci doménu/adresu, ktorá je prekladaná
+\end{itemize}
+Spracovanie argumentov je implementované pomocou vstavanej funkcie \verb|getopt|.
+
+\subsection{Trieda DnsSender}
+Trieda vytvára DNS paket obsahujúci otázku, vytvorí si daný socket, odošle tento packet 
+na daný DNS server a príjme odpoveď.
+
+Obsahuje následujúce metódy
+\begin{itemize}
+   \item \verb|send_query|
+   \item \verb|set_dns_socket|
+   \item \verb|create_dns_packet|
+   \item \verb|split_target|
+\end{itemize}
+
+A následujúce premenné
+\begin{itemize}
+   \item \verb|dnsSocket| - handle pre daný socket z ktoré je paket odoslaný a následne príjimaný 
+\end{itemize}
+
+\paragraph{Metóda send\_query}
+Metóda ktorá odošle DNS paket na daný server a príjme odpoveď. (Skladá sa z nasledujúcich metód)
+
+\paragraph{Metóda set\_dns\_socket}
+Metóda zistí alebo overí IP adresu zadaného DNS serveru (prevencia problému so vajíčkom a sliepkou,
+pretože je treba pomocou DNS preložiť doménu DNS serveru na IP adresu), toto je vykonané vstavanou funkciou
+\verb|getaddrinfo|, táto funckia naviac vracia správne nastavenia socketu pre komunikáciu s daným 
+serverom, pomocou týchto nastavení sa vytvorí socket a nastaví sa. Pre prevenciu nekonečného čakania na odpoveď,
+ak by sa serveru niečo stalo alebo by vôbec nekomunikoval je použitá socket funkcia \verb|connect|. Pretože 
+protokol UDP je bezstavový a používa best-afford-delivery. Týmto sa dokáže predísť nekonečnému čakaniu na odpoveď.
+
+\paragraph{Metóda create\_dns\_packet}
+Metóda vytvorí DNS paket (typu otázka, query) ktorý obsahuje správne nastavenie podľa zadaných parametrov.
+Ak je požadovaný reverzný dotaz, je správnosť adresy skontrolovaná a podľa typu (IPv4/IPv6) je rozdelená na dané
+štítky a zabudovaná do hlavičky (štítky, tak ako je definované v teórii o štítkoch). Ak je zadaná doména, je rovnako
+rozdelená na štítky a zabudovaná, tak ako je popísané v teorií. Ďalšie časti paketu su nastavené podľa zadaného vstupu.
+
+\paragraph{Metóda split\_target}
+Metóda je implementácia funkcie \verb|explode()| z jazyku PHP. Podľa zadaného znaku, rozdelí reťazec na vektor
+tokenov a tento vektor vráti.
+
+\subsection{Trieda DnsParser}
+Trieda spracováva DNS packet odoslaný serverom ako odpoveď. A vypíše jeho obsah na štandartný výstup.
+
+Obsahuje nasledujúce metódy
+\begin{itemize}
+   \item \verb|parse_dns_response|
+   \item \verb|parse_labels|
+   \item \verb|parse_answer| 
+\end{itemize}
+
+\paragraph{Metóda parse\_dns\_response}
+Metóda spracuje celý DNS packet.
+Metóda pretypováva packet a postupne sa po ňom posúva pomocou offsetov a volá nasledujúce pomocné funkcie.
+Medzi posúvaním po packete, vypisuje obsah packetu.
+
+\paragraph{Metóda parse\_labels}
+Metóda ktorá slúži pre spracovanie štítkov (labels) a ich vypísanie na štandartný výstup, metóde je možné
+zadefinovať, či je v danej časti povolená komprimácia packetov (to znamená že sa v časti môže nachádzať pointer na 
+štítok s daným offestom) metóda spracováva štítky až dokým nenarazí na 0x00 byte, čo znamená koniec štítkov. Ako už z popisu 
+vyplýva, metóda taktiež dokáže spracovať komprimované štítky (labels) pomocou offsetov.
+
+\paragraph{Metóda parse\_answer}
+Metóda ktorá slúži pre spracovanie posledných 3 častí DNS paketu (answer, autoritative a additional). Pretože 
+forma týchto 3 častí je rovnaká. Metóda používa predchádzajúcu metódu \verb|parse_labels| pre spracovanie štítkov (labels).
+Metóda podporuje spracovanie DNS záznamov uvedené v teórii (A, AAAA, CNAME, NS a PTR).
+
+\subsection{Hlavičkové súbory}
+Implementácia sa skladá z následujúcich hlavičkových súborov
+\begin{itemize}
+    \item \verb|dns_header|
+    \item \verb|dns_question|
+    \item \verb|dns_answer|
+    \item \verb|record_types|
+\end{itemize}
+
+\paragraph{Súbor dns\_header}
+Obsahuje reprezentáciu DNS hlavičky (header). Vzhľadom na to, že veľkosť hlavičky (header) je vždy pevná, je možné 
+celú časť zapísať do štruktúry a jednoducho si packet pretypovať na danú časť. Obsahuje časti spomenuté v teorií.
+
+\paragraph{Súbor dns\_question}
+Obsahuje pevné časti jednej DNS otázky (question), ktoré si kód, keď je treba pretypuje. Obsahuje položky uvedené v teorií.
+
+\paragraph{Súbor dns\_answer}
+Obsahuje pevné časti jednej DNS z odpovedí (answer, authoritative a additional). Ako predtým, tak vzhľadom na to že obsahuje iba
+pevne dané časti odpovedi, kód si packet pretypováva podla potreby (napr. za záznamom, pred záznamom).
+
+\paragraph{Súbor record\_types}
+Obsahuje makrá čísiel záznamov, pre lepšiu čitatelnosť kódu. Taktiež obsahuje makro pre maximálnu veľkosť DNS packetu.
+
+\newpage
+\section{Spúšťanie programu}
+Prekladanie programu je pomocou Makefile a príkazu \verb|make|.
+Spustenie je nasledujúce
+\begin{verbatim}
+   ./dns [-r] [-x] [-6] -s server [-p port] adresa 
+   -r - požadovaná rekurzia
+   -x - reverzný dotaz
+   -6 - dotaz s záznamom AAAA (IPv6)
+   -s - doména/adresa DNS severu na ktorý je DNS paket odoslaný 
+   -p - port na ktorý je DNS paket odoslaný
+\end{verbatim}
+\subsection{Príklad spustenia}
+\begin{verbatim}
+    $ ./dns -s kazi.fit.vutbr.cz www.google.com -r -p 53
+    Header section:
+    Type: Answer, Opcode: QUERY, Authorative answer: No, Trucanted: No, 
+    Recursion desired: Yes, Recursion avaiable: Yes, Reply code: 0 
+    Question section(1)
+    www.google.com, A, IN 
+    Answer section(1) 
+    www.google.com, A, IN, TTL: 300, 172.217.23.228
+    Authority section(0) 
+    Additional section(0) 
+
+    $ ./dns -s kazi.fit.vutbr.cz 172.217.23.228 -r -x
+    Header section:
+    Type: Answer, Opcode: QUERY, Authorative answer: No, Trucanted: No, 
+    Recursion desired: Yes, Recursion avaiable: Yes, Reply code: 0 
+    Question section(1)
+    228.23.217.172.in-addr.arpa, PTR, IN 
+    Answer section(2) 
+    228.23.217.172.in-addr.arpa, PTR, IN, TTL: 85558, prg03s06-in-f228.1e100.net
+    228.23.217.172.in-addr.arpa, PTR, IN, TTL: 85558, prg03s06-in-f4.1e100.net
+    Authority section(0) 
+    Additional section(0) 
+
+    $ ./dns -s 147.229.190.143 kazi.fit.vutbr.cz
+    Header section:
+    Type: Answer, Opcode: QUERY, Authorative answer: No, Trucanted: No,
+    Recursion desired: No, Recursion avaiable: Yes, Reply code: 0 
+    Question section(1)
+    kazi.fit.vutbr.cz, A, IN 
+    Answer section(1) 
+    kazi.fit.vutbr.cz, A, IN, TTL: 4649, 147.229.8.12
+    Authority section(4) 
+    fit.vutbr.cz, NS, IN, TTL: 3121, guta.fit.vutbr.cz
+    fit.vutbr.cz, NS, IN, TTL: 3121, rhino.cis.vutbr.cz
+    fit.vutbr.cz, NS, IN, TTL: 3121, gate.feec.vutbr.cz
+    fit.vutbr.cz, NS, IN, TTL: 3121, kazi.fit.vutbr.cz
+    Additional section(6) 
+    gate.feec.vutbr.cz, A, IN, TTL: 4802, 147.229.71.10
+    gate.feec.vutbr.cz, AAAA, IN, TTL: 11102, 2001:67c:1220:9847::93e5:470a
+    guta.fit.vutbr.cz, A, IN, TTL: 316, 147.229.9.11
+    guta.fit.vutbr.cz, AAAA, IN, TTL: 316, 2001:67c:1220:809::93e5:90b
+    rhino.cis.vutbr.cz, A, IN, TTL: 3196, 147.229.3.10
+    rhino.cis.vutbr.cz, AAAA, IN, TTL: 3196, 2001:67c:1220:e000::93e5:30a
+\end{verbatim}
+
+
+\newpage
+\begin{thebibliography}{999}
+\bibitem{RFC1035}
+    RFC 1035 - DOMAIN NAMES - IMPLEMENTATION AND SPECIFICATION
+    \url{https://www.ietf.org/rfc/rfc1035}
+\bibitem{RFC2929}
+    RFC 2929 - Domain Name System (DNS) IANA Considerations
+    \url{https://tools.ietf.org/html/rfc2929}
+\bibitem{RFC3425}
+    RFC 3425 - Obsoleting IQUERY
+    \url{https://tools.ietf.org/html/rfc3425}
+\bibitem{RFC8501}
+    RFC 8501 - Reverse DNS in IPv6 for Internet Service Providers
+    \url{https://tools.ietf.org/html/rfc8501}
+\bibitem{DNS - Wikipedia}
+    Domain name system - Wikipedia
+    \url{https://en.wikipedia.org/wiki/Domain_Name_System}
+\end{thebibliography}
+
+\end{document}

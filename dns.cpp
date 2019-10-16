@@ -359,7 +359,7 @@ char* DnsSender::send_query(Arguments *args, int *dnsResponseSize)
 
     // set timeout on recv 
     struct timeval tv;
-    tv.tv_sec = 1;
+    tv.tv_sec = 5;
     tv.tv_usec = 0;
     setsockopt(this->dnsSocket, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(tv));
     
@@ -549,6 +549,9 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
                 break;
             case PTR:
                 // PTR has labels, parse them
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case NS:
                 dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
                 break;
         }
