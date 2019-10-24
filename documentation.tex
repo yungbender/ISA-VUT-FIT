@@ -74,9 +74,7 @@ Typ záznamu, ktorých je mnoho. V tomto projekte sú najviac používané
 \begin{itemize}
     \item \verb|A| - záznam obsahujúci IPv4 adresu
     \item \verb|AAAA| - záznam obsahujúci IPv6 adresu
-    \item \verb|CNAME| - záznam obsahujúci alias danej domény za inú 
     \item \verb|PTR| - ukazateľ (pointer) na alias
-    \item \verb|NS| - autorizovaný záznam
 \end{itemize}
 
 \paragraph{CLASS}
@@ -112,6 +110,32 @@ Je dôležité poznamenať, že odpovede od DNS serveru, môžu byť komprimovan
 to znamená že namiesto značiek (labels), ktoré sa opakujú, je číselne daný offset
 od začiatku paketu kde sa daná značka nachádza po prvý krát. Tento príznak je naznačený tak,
 že na mieste prvých dvoch bitov bytu, ktorý označuje dĺžku labelu, sa nachádzajú bity 11.
+
+\paragraph{TYPE}
+V tejto sekcií je nutné poznamenať že pri odpovediach je program prispôsobiť rôznym typom odpovede. Tieto
+odpovede môžu byť rôzneho druhum, program dokáže rozpoznať tieto typy odpovedí
+\begin{itemize}
+    \item \verb|A| \textit{*}
+    \item \verb|NS| \textit{*}
+    \item \verb|MD| \textit{*}
+    \item \verb|MF| \textit{*}
+    \item \verb|CNAME| \textit{*} 
+    \item \verb|SOA| \textit{*}
+    \item \verb|MB| \textit{*}
+    \item \verb|MG| \textit{*}
+    \item \verb|MR|
+    \item \verb|NULL|
+    \item \verb|WKS|
+    \item \verb|PTR| \textit{*}
+    \item \verb|HINFO| 
+    \item \verb|MINFO| \textit{*}
+    \item \verb|MX| \textit{*}
+    \item \verb|TXT|
+    \item \verb|SRV|
+    \item \verb|AAAA| \textit{*}
+\end{itemize}
+
+Ale program dokáže spracovať obsah záznamov označených "\textit{*}".
 
 \subsubsection{Authoritative Answer (autorizovaná odpoveď)}
 Reprezentuje odpoveď DNS serveru, ktorý je autorizovaný. Takýto DNS server

@@ -20,6 +20,7 @@
 #include "dns_question.hpp"
 #include "dns_answer.hpp"
 #include "record_types.hpp"
+#include "soa_header.hpp"
 
 void error(std::string error)
 {
@@ -359,8 +360,9 @@ char* DnsSender::send_query(Arguments *args, int *dnsResponseSize)
 
     // set timeout on recv 
     struct timeval tv;
-    tv.tv_sec = 5;
+    tv.tv_sec = DNS_RESPONSE_WAIT;
     tv.tv_usec = 0;
+
     setsockopt(this->dnsSocket, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(tv));
     
     char *buffer = (char *)malloc(MAX_DNS_SIZE);
@@ -502,11 +504,29 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
             case NS:
                 std::cout << "NS, ";
                 break;
+            case MD:
+                std::cout << "MD, ";
+                break;
+            case MF:
+                std::cout << "MF, ";
+                break;
             case CNAME:
                 std::cout << "CNAME, ";
                 break;
             case SOA:
                 std::cout << "SOA, ";
+                break;
+            case MB:
+                std::cout << "MB, ";
+                break;
+            case MG:
+                std::cout << "MG, ";
+                break;
+            case MR:
+                std::cout << "MR, ";
+                break;
+            case NULL_R:
+                std::cout << "NULL";
                 break;
             case WKS:
                 std::cout << "WKS, ";
@@ -514,8 +534,17 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
             case PTR:
                 std::cout << "PTR, ";
                 break;
+            case HINFO:
+                std::cout << "HINFO, ";
+                break;
+            case MINFO:
+                std::cout << "MINFO, ";
+                break;
             case MX:
                 std::cout << "MX, ";
+                break;
+            case TXT:
+                std::cout << "TXT, ";
                 break;
             case SRV:
                 std::cout << "SRV, ";
@@ -525,8 +554,21 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
                 break;
         }
 
-        if(dnsAnswerMiddle->class_ == IN)
-            std::cout << "IN, ";
+        switch(dnsAnswerMiddle->class_)
+        {
+            case IN:
+                std::cout << "IN, ";
+                break;
+            case CS:
+                std::cout << "CS, ";
+                break;
+            case CH:
+                std::cout << "CH, ";
+                break;
+            case HS:
+                std::cout << "HS, ";
+                break;
+        }
 
         std::cout << "TTL: " << dnsAnswerMiddle->ttl << ", ";
 
@@ -553,6 +595,63 @@ char* DnsParser::parse_answer(char *dnsAnswer, int answerCounts, char *dnsRespon
                 break;
             case NS:
                 dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case SOA:
+            {
+                // parse MNAME 
+                std::cout << "Primary name: ";
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                std::cout << ", ";
+                // parse RNAME
+                std::cout << "Responsible authority mailbox: ";
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                std::cout << ", ";
+                // parse rest of SOA
+                soa_header *soaTail = (soa_header *)dnsRData;
+                soaTail->expire = ntohl(soaTail->expire);
+                soaTail->refresh = ntohl(soaTail->refresh);
+                soaTail->retry = ntohl(soaTail->retry);
+                soaTail->serial = ntohl(soaTail->serial);
+                soaTail->minimum = ntohl(soaTail->minimum);
+                // print it
+                std::cout << "Serial number: " << soaTail->serial << ", ";
+                std::cout << "Refresh interval: " << soaTail->refresh << ", ";
+                std::cout << "Retry interval: " << soaTail->retry << ", ";
+                std::cout << "Expire limit: "  << soaTail->expire << ", ";
+                std::cout << "Minimum TTL: " << soaTail->minimum;
+            }   break;
+            case MB:
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case MD:
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case MF:
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case MG:
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case MINFO:
+                // parse RMAILBX
+                std::cout << "Maling list: ";
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                std::cout << "Mailing errorbox: ";
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case MR:
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+                break;
+            case MX:
+            {
+                // parse preference
+                int16_t *preference = (int16_t *)dnsRData;
+                std::cout << "Preference: " << ntohs(*preference);
+                dnsRData = dnsRData + sizeof(int16_t);
+                dnsRData = this->parse_labels(dnsRData, true, dnsResponse);
+            }   break;
+            default:
+                std::cout << "unsupported parsing";
                 break;
         }
 
@@ -662,9 +761,20 @@ void DnsParser::parse_dns_response(char *dnsResponse, int *dnsResponseSize)
                 break;
         }
 
-        if(dnsQuestionTail->qclass == IN)
+        switch(dnsQuestionTail->qclass)
         {
-            std::cout << "IN \n";
+            case IN:
+                std::cout << "IN \n";
+                break;
+            case CS:
+                std::cout << "CS \n";
+                break;
+            case CH:
+                std::cout << "CH \n";
+                break;
+            case HS:
+                std::cout << "HS \n";
+                break;
         }
 
         // Get to the end of single dns question
