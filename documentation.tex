@@ -263,6 +263,10 @@ pevne dané časti odpovedi, kód si packet pretypováva podla potreby (napr. za
 \paragraph{Súbor record\_types}
 Obsahuje makrá čísiel záznamov, pre lepšiu čitatelnosť kódu. Taktiež obsahuje makro pre maximálnu veľkosť DNS packetu.
 
+\paragraph{Súbor soa\_header}
+Obsahuje poslednú časť, DNS záznamu typu \verb|SOA|. Z tohoto vyplýva že táto časť je velkosťou nepremenná a preto môže
+byť definovaná ako štruktúra.
+
 \newpage
 \section{Spúšťanie programu}
 Prekladanie programu je pomocou Makefile a príkazu \verb|make|.

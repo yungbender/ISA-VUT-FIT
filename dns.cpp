@@ -6,7 +6,6 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <sstream>
 #include <algorithm>
 #include <iomanip>
 #include <stdlib.h>
@@ -211,13 +210,32 @@ void DnsSender::set_dns_socket(std::string dnsServer, std::string port, Argument
 
 std::vector<std::string> DnsSender::split_target(std::string target, char delimeter)
 {
+    // Replace delimeter with space
     std::replace(target.begin(), target.end(), delimeter, ' ');
 
-    std::stringstream stringStream(target);
+    // Vector for the splitted tokens by space
     std::vector<std::string> tokens;
-    std::string backup;
-    while(stringStream >> backup)
-        tokens.push_back(backup);
+
+    // String for single token building
+    std::string token = "";
+
+    for(std::size_t index = 0; index < target.size(); index++)
+    {
+        // If its space, its delimeter, pushback the created token
+        if(target[index] == ' ')
+        {
+            tokens.push_back(token);
+            token = "";
+        }
+        // If its something else, add it to token
+        else
+        {
+            token.push_back(target[index]);
+        }   
+    }
+    // Dont forget the last one
+    tokens.push_back(token);
+
     return tokens;
 }
 
@@ -261,18 +279,28 @@ char* DnsSender::create_dns_packet(Arguments *args, int *dnsPacketSize)
 
             inet_pton(AF_INET6, args->target.c_str(), &ipv6);
 
-            std::ostringstream stream;
-            stream << std::hex << std::setfill('0');
-            for(int index : ipv6)
+            char byteHex[2];
+            memset(&byteHex, 0, 2);
+            for(int index = 15; index >= 0; index--)
             {
-                stream << std::setw(2) << index;
+                // Get the down hex number from ipv6 single byte
+                char firstHex = ipv6[index] & 0x0f;
+                // Remove the second hex number from single byte
+                firstHex = firstHex & 0x0f;
+
+                // Get the upper hex number from ipv6 single byte
+                char secondHex =  ipv6[index] & 0xf0;
+                // Need to shift it to the right by 4 because they were the upper bites
+                secondHex = secondHex >> 4;
+                // Remove the bit expansion made by compiler
+                secondHex = secondHex & 0x0f;
+
+                sprintf(byteHex, "%x", firstHex);
+                tokens.push_back(byteHex);
+                sprintf(byteHex, "%x", secondHex);
+                tokens.push_back(byteHex);
             }
 
-            std::string result = stream.str();
-            for(unsigned index = result.size() - 1; index < result.size(); index--)
-            {
-                tokens.push_back(std::string(1, result[index]));
-            }
             tokens.push_back("ip6");
             tokens.push_back("arpa");
         }
