@@ -6,7 +6,7 @@
 typedef struct dns_headers{
     unsigned id :16; // ID of question
     
-    #if BYTE_ORDER == LITTLE_ENDIAN
+    #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     unsigned rd :1;
     unsigned tc :1;
     unsigned aa :1;
@@ -15,7 +15,7 @@ typedef struct dns_headers{
     unsigned rcode :4;
     unsigned reserved :3;
     unsigned ra :1;
-    #else // BIG_ENDIAN 
+    #else // BIG_ENDIAN
     unsigned qr :1;
     unsigned opcode :4;
     unsigned aa :1;

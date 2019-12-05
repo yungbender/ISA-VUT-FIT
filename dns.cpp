@@ -69,6 +69,22 @@ class Arguments
         this->port = "53"; // Default DNS port
         this->target = "";
     }
+
+    /**
+     * Method prints help to the output and exits program.
+     */
+    void print_help()
+    {
+        printf("DNS Resolver\n\n");
+        printf("Arguments: [-r] [-x] [-6] -s server [-p port] address\n");
+        printf("-r: Recursion desired (flag = 1)\n");
+        printf("-x: Perform reverse query\n");
+        printf("-6: Query for AAAA record instead of A\n");
+        printf("-s: IP address or domain of DNS server\n");
+        printf("-p: Port where to send DNS query\n");
+        printf("address: Address in query\n");
+        exit(0);
+    }
 };
 
 
@@ -78,7 +94,7 @@ Arguments* Arguments::parse_arguments(int argc, char **argv)
 
     bool wasServer = false;
     char option;
-    while((option = getopt(argc, argv, "r::x::6::s:p:")) != -1)
+    while((option = getopt(argc, argv, "r::x::6::s:p:h::")) != -1)
     {
         switch(option)
         {
@@ -98,6 +114,10 @@ Arguments* Arguments::parse_arguments(int argc, char **argv)
             case 'p':
                 arguments->port = optarg;
                 break;
+            case 'h':
+                arguments->print_help();
+            case '?':
+                error("Invalid argument given!\n");
         }
     }
 
@@ -398,8 +418,7 @@ char* DnsSender::send_query(Arguments *args, int *dnsResponseSize)
 
     if((recieved = recv(this->dnsSocket, buffer, MAX_DNS_SIZE, 0)) < 0)
     {
-        if(errno != EINTR)
-            error(strerror(errno));
+        error(strerror(errno));
     }
 
     close(this->dnsSocket);
@@ -455,6 +474,12 @@ char* DnsParser::parse_labels(char *labelStart, bool allowPointer, char *dnsStar
     backup = labelStart;
     bool wasBackedUp = false;
 
+    // Label is 0 it is empty string that means root of dns tree
+    if (*labelStart == 0)
+    {
+        std::cout << "<root>";
+    }
+
     while(*labelStart != 0)
     {
         uint16_t pointerCheck;
@@ -492,8 +517,7 @@ char* DnsParser::parse_labels(char *labelStart, bool allowPointer, char *dnsStar
         // get to the next label = Pointer to the token label + 1 byte (label number) + label chars itself
         labelStart = labelValue + labelStart + 1;
         // If its not last label, print dot
-        if(*labelStart != 0)
-            std::cout << ".";
+        std::cout << ".";
     }
     // If the pointer was backedup, need to return the backed up one
     if(wasBackedUp)

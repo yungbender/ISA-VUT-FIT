@@ -1,0 +1,28 @@
+DNS Resolver
+
+Jednoduchý DNS resolver, ktorý žiada o A/AAAA/PTR záznamy zadaný DNS server a spracuje odpoveď.
+
+Preklad:
+make
+
+Spustenie:
+./dns [-r] [-x] [-6] -s server [-p port] adresa
+
+Poznámka: Na freeBSD (napr. eva.fit.vutbr.cz) je potrebné zadávať poradie parametrov v správnom poradí.
+
+napr. (linux, merlin):
+./dns -s kazi.fit.vutbr.cz -p 53 www.google.com -r (V tomto prípade eva, freebsd odignoruje -r)
+(freebsd, eva)
+./dns -s kazi.fit.vutbr.cz -r -p 53 www.google.com
+
+Zoznam súborov:
+Makefile
+dns.cpp
+dns_answer.hpp
+dns_question.hpp
+dms_header.hpp
+manual.pdf
+README
+soa_header.hpp
+record_types.hpp
+
